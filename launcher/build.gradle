@@ -1,0 +1,33 @@
+plugins { id 'com.android.application' }
+
+def signing = new Properties()
+signing.load(rootProject.file('.local/signing.properties').newInputStream())
+
+android {
+    namespace 'com.ireaderlauncher.app'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.ireaderlauncher.app'
+        minSdk 28
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+        testInstrumentationRunner 'com.ireaderlauncher.app.SmokeInstrumentation'
+    }
+    signingConfigs {
+        local {
+            storeFile rootProject.file('.local/launcher.jks')
+            storePassword signing.getProperty('password')
+            keyAlias 'launcher'
+            keyPassword signing.getProperty('password')
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.local }
+        release { signingConfig signingConfigs.local; minifyEnabled false }
+    }
+    buildFeatures { aidl true }
+    sourceSets.main.aidl.srcDirs += '../shared/aidl'
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    lint { abortOnError true }
+}

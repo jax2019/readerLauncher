@@ -1,0 +1,22 @@
+plugins { id 'com.android.application' }
+
+def signing = new Properties()
+signing.load(rootProject.file('.local/signing.properties').newInputStream())
+
+android {
+    namespace 'com.ireaderlauncher.powerbridge'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.ireaderlauncher.powerbridge'
+        minSdk 28
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'LAUNCHER_CERT_SHA256', '"' + signing.getProperty('certificateSha256') + '"'
+    }
+    buildTypes { release { minifyEnabled false } }
+    buildFeatures { aidl true; buildConfig true }
+    sourceSets.main.aidl.srcDirs += '../shared/aidl'
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    lint { abortOnError true; disable 'SharedUserId' }
+}

@@ -96,12 +96,16 @@ def sdk_build(env, sdk, checks):
         manifest_file = build_dir / 'AndroidManifest.xml'
         ET.ElementTree(manifest).write(manifest_file, encoding='utf-8', xml_declaration=True)
         resources = ROOT / module / 'src/main/res'
-        link = [bt / 'aapt2', 'link', '--manifest', manifest_file, '-I', android_jar, '--min-sdk-version', '28',
+        link = [bt / 'aapt2', 'link', '--manifest', manifest_file, '-I', android_jar, '--java', generated, '--min-sdk-version', '28',
                 '--target-sdk-version', '34', '--version-code', '1', '--version-name', '0.1.0', '-o', build_dir / 'resources.apk']
         if resources.exists():
             run([bt / 'aapt2', 'compile', '--dir', resources, '-o', build_dir / 'compiled.zip'], env=env)
             link += [build_dir / 'compiled.zip']
         run(link, env=env)
+        # 原生布局开始引用 R；SDK 构建也要编译 aapt2 生成的资源常量。
+        for source in generated.rglob('R.java'):
+            if source not in sources:
+                sources.append(source)
         if shell:
             config = generated / 'com/ireaderlauncher/powerbridge/BuildConfig.java'
             config.parent.mkdir(parents=True, exist_ok=True)

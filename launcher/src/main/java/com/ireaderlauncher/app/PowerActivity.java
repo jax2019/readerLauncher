@@ -24,10 +24,12 @@ public final class PowerActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final List<android.view.View> controls = new ArrayList<>();
     private IPowerBridge bridge;
+    private DuokanPowerController nativePower;
     private LinearLayout rows;
     private TextView summary, last;
     private boolean bound, busy;
     private Button recommend, restore, refresh;
+    private Button wifiSettings;
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder service) { bridge = IPowerBridge.Stub.asInterface(service); call(() -> bridge.status(), false); }
         @Override public void onServiceDisconnected(ComponentName name) { bridge = null; unavailable("控制组件已断开，请返回后重试"); }
@@ -36,35 +38,54 @@ public final class PowerActivity extends Activity {
     };
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (DeviceProfile.current().nativePowerControls()) nativePower = new DuokanPowerController(this);
         LinearLayout root = Ui.screen(this);
         Ui.title(this, root, "省电助手", "按需开关，修改前自动保存原设置。");
-        summary = Ui.text(this, "正在连接控制组件…", 17, true); root.addView(summary); Ui.space(this, root, 16);
-        recommend = Ui.button(this, "应用推荐设置", true, () -> call(() -> bridge.recommended(), true));
+        summary = Ui.text(this, nativePower == null ? "正在连接控制组件…" : "正在读取多看系统状态…", 17, true); root.addView(summary); Ui.space(this, root, 16);
+        recommend = Ui.button(this, "应用推荐设置", true, () -> call(() -> nativePower == null ? bridge.recommended() : nativePower.recommended().toString(), true));
         root.addView(recommend, new LinearLayout.LayoutParams(-1, Ui.dp(this, 58))); controls.add(recommend);
         Ui.space(this, root, 10);
-        TextView explanation = Ui.text(this, "关闭调试日志录制与自启，开启轻度 Doze。", 15, false); explanation.setTextColor(Ui.MUTED); root.addView(explanation);
+        TextView explanation = Ui.text(this, nativePower == null ? "关闭调试日志录制与自启，开启轻度 Doze。"
+                : "自动息屏设为 2 分钟，关闭两项后台扫描；不改动 Wi-Fi、蓝牙和定位。", 15, false); explanation.setTextColor(Ui.MUTED); root.addView(explanation);
         Ui.space(this, root, 16);
         LinearLayout actions = new LinearLayout(this);
-        refresh = Ui.button(this, "刷新状态", false, () -> call(() -> bridge.status(), false));
-        restore = Ui.button(this, "恢复原设置", false, () -> call(() -> bridge.restore(), true));
+        refresh = Ui.button(this, "刷新状态", false, () -> call(this::readState, false));
+        restore = Ui.button(this, "恢复原设置", false, () -> call(() -> nativePower == null ? bridge.restore() : nativePower.restore().toString(), true));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, Ui.dp(this, 52), 1); lp.setMarginEnd(Ui.dp(this, 10));
         actions.addView(refresh, lp); actions.addView(restore, new LinearLayout.LayoutParams(0, Ui.dp(this, 52), 1)); root.addView(actions);
         controls.add(refresh); controls.add(restore);
+        if (nativePower != null) {
+            Ui.space(this, root, 14);
+            List<Button> links = new ArrayList<>();
+            wifiSettings = Ui.button(this, "Wi-Fi 设置", false, () -> Ui.launch(this,
+                    new Intent(android.provider.Settings.ACTION_WIFI_SETTINGS).setPackage("com.android.settings")));
+            links.add(wifiSettings);
+            links.add(Ui.button(this, "应用电池优化", false, () -> Ui.launch(this,
+                    new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).setPackage("com.android.settings"))));
+            Ui.grid(this, root, links, 2, 58);
+        }
         Ui.space(this, root, 16); last = Ui.text(this, "", 14, false); last.setTextColor(Ui.MUTED); root.addView(last);
         Ui.space(this, root, 22); rows = Ui.column(this); root.addView(rows); setBusy(true);
     }
     @Override protected void onStart() {
         super.onStart();
+        if (nativePower != null) { call(this::readState, false); return; }
         try {
             bound = bindService(new Intent().setClassName("com.ireaderlauncher.powerbridge", "com.ireaderlauncher.powerbridge.PowerService"), connection, Context.BIND_AUTO_CREATE);
             if (!bound) unavailable("尚未安装控制组件，请使用项目的设备安装工具");
         } catch (Exception e) { unavailable("控制组件无法连接：" + e.getMessage()); }
     }
+    @Override protected void onResume() {
+        super.onResume();
+        // 从系统设置或通知面板返回时刷新，不在后台持续轮询。
+        if (nativePower != null && !busy) call(this::readState, false);
+    }
     @Override protected void onStop() { if (bound) { unbindService(connection); bound = false; } bridge = null; super.onStop(); }
     @Override protected void onDestroy() { worker.shutdownNow(); super.onDestroy(); }
     private interface Task { String run() throws Exception; }
+    private String readState() throws Exception { return nativePower == null ? bridge.status() : nativePower.status().toString(); }
     private void call(Task task, boolean operation) {
-        if (bridge == null || busy && operation) return;
+        if (bridge == null && nativePower == null || busy && operation) return;
         setBusy(true); summary.setText(operation ? "正在应用并核验设置…" : "正在读取系统状态…");
         worker.execute(() -> {
             try {
@@ -90,13 +111,15 @@ public final class PowerActivity extends Activity {
     private void render(JSONObject state) {
         rows.removeAllViews();
         while (controls.size() > 3) controls.remove(controls.size() - 1);
-        summary.setText(state.optBoolean("controlReady") ? "控制已就绪 · 重启后可直接使用" : "控制权限暂不可用");
+        summary.setText(state.optString("controlSummary", state.optBoolean("controlReady") ? "控制已就绪 · 重启后可直接使用" : "控制权限暂不可用"));
+        if (wifiSettings != null) wifiSettings.setText(getSystemService(android.net.wifi.WifiManager.class).isWifiEnabled() ? "Wi-Fi 设置 · 已开启" : "Wi-Fi 设置 · 已关闭");
         recommend.setTag(!state.optBoolean("controlReady")); restore.setTag(!state.optBoolean("hasBaseline"));
         last.setText(state.optString("lastOperation"));
         JSONArray options = state.optJSONArray("options"); if (options == null) return;
         for (int i = 0; i < options.length(); i++) {
             JSONObject o = options.optJSONObject(i); if (o == null) continue;
             String id = o.optString("id");
+            if (id.equals("screen_timeout")) { addTimeout(o); continue; }
             if (id.equals("deep_doze")) continue;
             if (id.equals("light_doze")) { addDoze(options, o); continue; }
             if (id.equals("logger") || id.equals("wifi") || id.equals("ai")) {
@@ -127,11 +150,34 @@ public final class PowerActivity extends Activity {
             toggle.setTag(!o.optBoolean("supported"));
             toggle.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), 0, Ui.dp(this, 10));
             // 应用开关表示“是否优化”，与系统应用的 enabled 值方向相反。
-            toggle.setOnCheckedChangeListener((button, selected) -> call(() -> bridge.setEnabled(id, appOptimization ? !selected : selected), true));
+            toggle.setOnCheckedChangeListener((button, selected) -> call(() -> nativePower == null
+                    ? bridge.setEnabled(id, appOptimization ? !selected : selected) : nativePower.change(id, selected).toString(), true));
             panel.addView(toggle); controls.add(toggle); rows.addView(panel); Ui.space(this, rows, 10);
         }
         Ui.space(this, rows, 12);
-        TextView note = Ui.text(this, "停用官方书城与阅读服务时，官方桌面入口也会暂停，可在这里关闭优化恢复。微信读书、系统设置、输入法及屏幕和电源基础服务不在停用范围内。新增项目不会自动开启，也不纳入一键推荐。", 14, false); note.setTextColor(Ui.MUTED); rows.addView(note);
+        TextView note = Ui.text(this, nativePower == null
+                ? "停用官方书城与阅读服务时，官方桌面入口也会暂停，可在这里关闭优化恢复。微信读书、系统设置、输入法及屏幕和电源基础服务不在停用范围内。新增项目不会自动开启，也不纳入一键推荐。"
+                : "多看使用独立系统授权控制，首次修改前保存原值。Wi-Fi 和应用电池优化从上方系统页面管理；掌阅专用日志、Doze 档位和应用冻结不在此设备显示。", 14, false);
+        note.setTextColor(Ui.MUTED); rows.addView(note);
+    }
+    private void addTimeout(JSONObject option) {
+        long current = option.optLong("milliseconds", -1);
+        boolean available = option.optBoolean("supported");
+        LinearLayout panel = Ui.column(this);
+        panel.setPadding(Ui.dp(this, 18), Ui.dp(this, 16), Ui.dp(this, 18), Ui.dp(this, 16));
+        panel.setBackground(Ui.background(this, 0xffffffff, Ui.LINE));
+        panel.addView(Ui.text(this, "自动息屏", 18, true)); Ui.space(this, panel, 6);
+        String text = current < 0 ? "当前时长未知" : "当前：" + (current % 60000 == 0 ? current / 60000 + " 分钟" : current / 1000 + " 秒");
+        TextView description = Ui.text(this, text + "。" + option.optString("error", option.optString("description")), 14, false);
+        description.setTextColor(Ui.MUTED); panel.addView(description); Ui.space(this, panel, 12);
+        List<Button> choices = new ArrayList<>();
+        for (int minutes : new int[]{1, 2, 5, 10}) {
+            long duration = minutes * 60000L;
+            Button button = Ui.button(this, minutes + " 分钟", current == duration,
+                    () -> call(() -> nativePower.setTimeout(duration).toString(), true));
+            button.setTag(!available || current == duration); controls.add(button); choices.add(button);
+        }
+        Ui.grid(this, panel, choices, 4, 50); rows.addView(panel); Ui.space(this, rows, 10);
     }
     private void addDoze(JSONArray options, JSONObject light) {
         JSONObject deep = null;

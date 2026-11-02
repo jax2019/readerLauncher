@@ -1,0 +1,17 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="40dp"
+    android:orientation="horizontal" android:gravity="center_vertical">
+    <TextView android:id="@+id/bluetooth_status"
+        android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+        android:textSize="14sp" android:maxLines="2" android:ellipsize="end" />
+    <Button android:id="@+id/bluetooth_toggle"
+        android:layout_width="64dp" android:layout_height="32dp" android:layout_marginEnd="8dp"
+        android:background="@drawable/bg_notification_button" android:textColor="#202020"
+        android:minHeight="0dp" android:minWidth="0dp" android:padding="4dp" android:textSize="14sp" android:textAllCaps="false" />
+    <Button android:id="@+id/bluetooth_settings"
+        android:layout_width="88dp" android:layout_height="32dp"
+        android:background="@drawable/bg_notification_button" android:textColor="#202020"
+        android:minHeight="0dp" android:minWidth="0dp" android:padding="4dp" android:textSize="14sp" android:textAllCaps="false"
+        android:text="蓝牙设置" />
+</LinearLayout>

@@ -1,6 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 蓝牙快捷功能仅用于已适配的 Android 11 多看，不向新系统申请额外蓝牙权限。 -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 多看安装工具一次性授予设置权限；不使用掌阅平台证书或 shell 身份。 -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" android:maxSdkVersion="30" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <queries>
         <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>
+        <intent><action android:name="android.settings.HOME_SETTINGS" /></intent>
+        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.HOME" /></intent>
+        <package android:name="com.moan.setting" />
+        <package android:name="com.duokan.einkreader" />
         <package android:name="com.ireaderlauncher.powerbridge" />
         <package android:name="com.android.settings" />
         <package android:name="com.szzy.ireader.settings" />
@@ -27,5 +41,18 @@
         <activity android:name=".PowerActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".AppsActivity" android:exported="false" />
+        <activity android:name=".ScreenLockActivity" android:exported="false" android:excludeFromRecents="true" />
+        <receiver android:name=".ScreenLockAdminReceiver" android:label="阅桌面锁屏"
+            android:permission="android.permission.BIND_DEVICE_ADMIN" android:exported="true">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/screen_lock_admin" />
+            <intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED" /></intent-filter>
+        </receiver>
+        <service android:name=".BluetoothQuickActionService" android:exported="false" />
+        <receiver android:name=".BluetoothRestoreReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

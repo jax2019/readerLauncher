@@ -24,12 +24,20 @@ public final class SmokeInstrumentation extends Instrumentation {
     private boolean backgroundOnly;
     private boolean locationOnly;
     private boolean lockOnly;
+    private boolean desktopOnly;
+    private boolean bluetoothOnly;
+    private boolean nativePowerOnly;
+    private boolean nativeLockOnly;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         dozeOnly = arguments != null && "doze".equals(arguments.getString("suite"));
         backgroundOnly = arguments != null && "background".equals(arguments.getString("suite"));
         locationOnly = arguments != null && "location".equals(arguments.getString("suite"));
-        lockOnly = arguments != null && "lock".equals(arguments.getString("suite")); start();
+        lockOnly = arguments != null && "lock".equals(arguments.getString("suite"));
+        desktopOnly = arguments != null && "desktop".equals(arguments.getString("suite"));
+        bluetoothOnly = arguments != null && "bluetooth".equals(arguments.getString("suite"));
+        nativePowerOnly = arguments != null && "native_power".equals(arguments.getString("suite"));
+        nativeLockOnly = arguments != null && "native_lock".equals(arguments.getString("suite")); start();
     }
     private void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
     @Override public void onStart() {
@@ -43,10 +51,24 @@ public final class SmokeInstrumentation extends Instrumentation {
         };
         boolean bound = false;
         try {
-            Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
-            check(c.getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY).activityInfo.packageName.equals(c.getPackageName()), "默认桌面未生效");
-            c.getPackageManager().getActivityInfo(new ComponentName("com.zhangyue.iReader.Eink", "com.zhangyue.iReader.Eink.home.ActivityLauncher"), PackageManager.MATCH_DISABLED_COMPONENTS);
-            check(c.getPackageManager().resolveActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS), 0) != null, "开发者入口不可用");
+            checkDesktop(c);
+            if (nativePowerOnly || nativeLockOnly) {
+                DuokanPowerSmoke nativeTest = new DuokanPowerSmoke(this);
+                if (nativePowerOnly) nativeTest.power(); else nativeTest.lock();
+                result.putString("result", nativePowerOnly ? "PASS: 多看省电状态、真实开关、息屏时长、推荐设置、非法输入与原始配置恢复"
+                        : "PASS: 多看锁屏授权、真实息屏、重复锁屏与授权和屏幕原状态恢复");
+                finish(android.app.Activity.RESULT_OK, result); return;
+            }
+            if (bluetoothOnly) {
+                new BluetoothSmoke(this).run();
+                result.putString("result", "PASS: 蓝牙偏好、真实开关、重复请求、通知操作、外部状态同步、恢复入口与原始状态恢复");
+                finish(android.app.Activity.RESULT_OK, result); return;
+            }
+            if (desktopOnly || !DeviceProfile.current().powerControls && !lockOnly && !dozeOnly && !backgroundOnly && !locationOnly) {
+                result.putString("result", "PASS: 默认桌面、厂商与系统入口、应用名称、收藏兼容及设备能力隔离");
+                finish(android.app.Activity.RESULT_OK, result); return;
+            }
+            check(DeviceProfile.current().powerControls, "当前设备不支持掌阅省电控制测试，请使用 desktop 或 bluetooth 套件");
             bound = c.bindService(new Intent().setClassName("com.ireaderlauncher.powerbridge", "com.ireaderlauncher.powerbridge.PowerService"), connection, Context.BIND_AUTO_CREATE);
             check(bound && ready.await(10, TimeUnit.SECONDS), "权限组件无法绑定");
             if (lockOnly) {
@@ -111,6 +133,36 @@ public final class SmokeInstrumentation extends Instrumentation {
             result.putString("result", "FAIL: " + e);
             finish(android.app.Activity.RESULT_CANCELED, result);
         } finally { if (bound) c.unbindService(connection); }
+    }
+    /** 通用桌面验收独立于掌阅特权组件，多看无需绑定权限服务。 */
+    private void checkDesktop(Context c) throws Exception {
+        PackageManager pm = c.getPackageManager();
+        android.content.pm.ResolveInfo home = pm.resolveActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY);
+        check(home != null && home.activityInfo.packageName.equals(c.getPackageName()), "默认桌面未生效");
+        if (android.os.Build.VERSION.SDK_INT >= 29)
+            check(c.getSystemService(android.app.role.RoleManager.class).isRoleHeld(android.app.role.RoleManager.ROLE_HOME), "默认桌面角色未同步，重启可能改变默认桌面");
+        DeviceProfile profile = DeviceProfile.current();
+        // 掌阅允许用户主动冻结官方阅读服务，通用检查不要求重新启用它。
+        check(profile.officialHome != null && pm.getActivityInfo(profile.officialHome, PackageManager.MATCH_DISABLED_COMPONENTS).exported, "官方桌面入口不可用");
+        check(profile.settings != null && pm.getActivityInfo(profile.settings, 0).exported, "厂商设置入口不可用");
+        for (String action : new String[]{android.provider.Settings.ACTION_SETTINGS,
+                android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS, android.provider.Settings.ACTION_HOME_SETTINGS})
+            check(pm.resolveActivity(new Intent(action), 0) != null, "系统入口不可用：" + action);
+        check(AppCatalog.displayName("com.android.settings", "设置").equals("Android 系统设置"), "Android 设置名称未区分");
+        check(AppCatalog.displayName("com.moan.setting", "设置").equals("多看系统设置"), "多看设置名称未区分");
+        check(AppCatalog.displayName("com.szzy.ireader.settings", "设置").equals("掌阅系统设置"), "掌阅设置名称未区分");
+        check(AppCatalog.displayName("com.example", "设置").equals("设置"), "误改无关应用名称");
+        java.util.Set<String> favorites = AppCatalog.favorites(c);
+        for (android.content.pm.ResolveInfo app : AppCatalog.apps(c)) AppCatalog.displayName(c, app);
+        check(AppCatalog.favorites(c).equals(favorites), "名称转换改动收藏记录");
+        DeviceProfile duokan = DeviceProfile.forDevice("MiDuoKanReaderProII", 30);
+        DeviceProfile ireader = DeviceProfile.forDevice("Neo 3 Ultra", 34);
+        check(!duokan.powerControls && duokan.bluetoothQuickActions, "多看能力错误");
+        check(duokan.hasPowerAssistant() && duokan.hasScreenLock() && duokan.nativePowerControls(), "多看省电或锁屏入口缺失");
+        check(ireader.powerControls && !ireader.bluetoothQuickActions, "掌阅能力回归");
+        check(ireader.officialHome.getPackageName().equals("com.zhangyue.iReader.Eink"), "掌阅官方入口回归");
+        check(!DeviceProfile.forDevice("MiDuoKanReaderProII", 34).bluetoothQuickActions, "未知固件意外开启旧蓝牙 API");
+        check(!DeviceProfile.forDevice("unknown", 30).powerControls, "未知设备意外启用特权功能");
     }
     /** 独立验证即时锁屏，不运行会修改个人配置的全量省电测试。 */
     private void checkScreenLock(Context context, IPowerBridge bridge) throws Exception {

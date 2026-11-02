@@ -17,7 +17,7 @@ public final class AppsActivity extends Activity {
         for (ResolveInfo r : AppCatalog.apps(this)) {
             String pkg = r.activityInfo.packageName;
             LinearLayout row = new LinearLayout(this); row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-            android.widget.Button launch = Ui.button(this, r.loadLabel(getPackageManager()).toString(), false, () -> {
+            android.widget.Button launch = Ui.button(this, AppCatalog.displayName(this, r), false, () -> {
                 Intent i = getPackageManager().getLaunchIntentForPackage(pkg); if (i != null) Ui.launch(this, i);
             });
             row.addView(launch, new LinearLayout.LayoutParams(0, Ui.dp(this, 58), 1));

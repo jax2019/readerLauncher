@@ -89,10 +89,15 @@ final class Ui {
         catch (Exception e) { Toast.makeText(a, "此入口暂时无法打开，请从系统设置进入", Toast.LENGTH_LONG).show(); }
     }
     static void officialHome(Activity a) {
-        ComponentName home = new ComponentName("com.zhangyue.iReader.Eink", "com.zhangyue.iReader.Eink.home.ActivityLauncher");
+        DeviceProfile profile = DeviceProfile.current();
+        ComponentName home = profile.officialHome;
+        if (home == null) { Toast.makeText(a, "此设备尚未配置官方桌面入口", Toast.LENGTH_LONG).show(); return; }
         try {
             // 停用期间引导用户恢复，不因点击入口而悄悄改变省电选择。
             if (!a.getPackageManager().getActivityInfo(home, PackageManager.MATCH_DISABLED_COMPONENTS).applicationInfo.enabled) {
+                if (!profile.powerControls) {
+                    Toast.makeText(a, "官方桌面已停用，请在 Android 系统设置中恢复", Toast.LENGTH_LONG).show(); return;
+                }
                 new android.app.AlertDialog.Builder(a).setTitle("官方阅读服务已停用")
                         .setMessage("请到省电助手关闭“官方书城与阅读服务”的应用优化，再打开官方桌面。")
                         .setPositiveButton("打开省电助手", (dialog, which) -> launch(a, new Intent(a, PowerActivity.class)))

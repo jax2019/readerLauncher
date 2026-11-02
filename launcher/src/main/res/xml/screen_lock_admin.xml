@@ -1,0 +1,4 @@
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅申请立即锁屏，不申请清除数据、密码管理或设备所有者权限。 -->
+    <uses-policies><force-lock /></uses-policies>
+</device-admin>

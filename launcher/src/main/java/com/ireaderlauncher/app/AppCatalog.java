@@ -12,6 +12,18 @@ import java.util.Set;
 
 final class AppCatalog {
     static final String WEREAD = "com.tencent.weread.eink";
+    /** 仅替换已知系统应用的展示名；收藏和启动始终沿用原包名。 */
+    static String displayName(String pkg, String original) {
+        switch (pkg) {
+            case "com.android.settings": return "Android 系统设置";
+            case "com.moan.setting": return "多看系统设置";
+            case "com.szzy.ireader.settings": return "掌阅系统设置";
+            default: return original;
+        }
+    }
+    static String displayName(Context c, ResolveInfo app) {
+        return displayName(app.activityInfo.packageName, app.loadLabel(c.getPackageManager()).toString());
+    }
     static Set<String> favorites(Context c) {
         return new HashSet<>(c.getSharedPreferences("desktop", Context.MODE_PRIVATE).getStringSet("favorites", new HashSet<>()));
     }
@@ -27,7 +39,7 @@ final class AppCatalog {
             if (!pkg.equals(c.getPackageName()) && !pkg.equals("com.ireaderlauncher.powerbridge") && seen.add(pkg)) result.add(r);
         }
         Collator collator = Collator.getInstance(Locale.CHINA);
-        result.sort((a, b) -> collator.compare(a.loadLabel(c.getPackageManager()).toString(), b.loadLabel(c.getPackageManager()).toString()));
+        result.sort((a, b) -> collator.compare(displayName(c, a), displayName(c, b)));
         return result;
     }
 }

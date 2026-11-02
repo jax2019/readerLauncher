@@ -1,6 +1,7 @@
 package com.ireaderlauncher.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -9,18 +10,21 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.ResolveInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Button;
-import android.widget.Toast;
 import com.ireaderlauncher.bridge.IPowerBridge;
 import org.json.JSONObject;
 import java.util.ArrayList;
@@ -38,6 +42,7 @@ public final class MainActivity extends Activity {
     private ServiceConnection lockConnection;
     private Runnable lockTimeout;
     private boolean lockBound;
+    private boolean resumed;
     private TextView bluetoothError;
     private Button bluetoothToggle;
     private boolean bluetoothListening;
@@ -52,6 +57,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) { super.onCreate(state); }
     @Override protected void onResume() {
         super.onResume();
+        resumed = true;
         BluetoothQuickActions.ensureRunning(this);
         render();
         if (DeviceProfile.current().bluetoothQuickActions) {
@@ -66,6 +72,7 @@ public final class MainActivity extends Activity {
         listening = true;
     }
     @Override protected void onPause() {
+        resumed = false;
         if (listening) { unregisterReceiver(receiver); listening = false; }
         if (bluetoothListening) { unregisterReceiver(bluetoothReceiver); bluetoothListening = false; }
         super.onPause();
@@ -163,7 +170,8 @@ public final class MainActivity extends Activity {
         bluetoothToggle.setContentDescription("蓝牙：" + status + (busy || state == BluetoothQuickActions.UNKNOWN ? "" : "，点击" + action + "蓝牙"));
     }
     private void lockScreen() {
-        if (DeviceProfile.current().nativePowerControls()) {
+        // 已有系统锁屏授权时直接使用，避免锁屏依赖另一个进程的可用性。
+        if (DeviceProfile.current().nativePowerControls() || ScreenLockActivity.authorized(this)) {
             Ui.launch(this, new Intent(this, ScreenLockActivity.class)); return;
         }
         if (lockConnection != null) return;
@@ -179,6 +187,7 @@ public final class MainActivity extends Activity {
                         JSONObject result = new JSONObject(bridge.lockScreen());
                         if (!result.optBoolean("ok")) error = result.optString("message", "锁屏未成功，请重试");
                     } catch (Exception e) {
+                        Log.w("IReaderLock", "控制组件锁屏调用失败", e);
                         error = "锁屏失败，请确认控制组件已更新后重试";
                     }
                     String message = error;
@@ -193,19 +202,55 @@ public final class MainActivity extends Activity {
         lockTimeout = () -> finishLock(request, "锁屏连接超时，请重试");
         main.postDelayed(lockTimeout, 20000);
         try {
-            lockBound = bindService(new Intent().setClassName("com.ireaderlauncher.powerbridge",
+            // 即使绑定返回 false，也释放本次注册的 ServiceConnection，避免失败重试时泄漏。
+            lockBound = true;
+            boolean connected = bindService(new Intent().setClassName("com.ireaderlauncher.powerbridge",
                     "com.ireaderlauncher.powerbridge.PowerService"), request, Context.BIND_AUTO_CREATE);
-            if (!lockBound) finishLock(request, "尚未安装控制组件，请使用项目的设备安装工具");
-        } catch (Exception e) { finishLock(request, "控制组件无法连接，请重试"); }
+            if (!connected) finishLock(request, lockComponentError());
+        } catch (Exception e) {
+            Log.w("IReaderLock", "控制组件绑定失败", e);
+            finishLock(request, lockComponentError());
+        }
+    }
+    private String lockComponentError() {
+        // bindService 返回 false 不等于未安装，分别检查安装状态和显式停用状态。
+        ComponentName component = new ComponentName("com.ireaderlauncher.powerbridge",
+                "com.ireaderlauncher.powerbridge.PowerService");
+        try {
+            PackageManager pm = getPackageManager();
+            ServiceInfo info = pm.getServiceInfo(component, PackageManager.MATCH_DISABLED_COMPONENTS);
+            int state = pm.getComponentEnabledSetting(component);
+            if (!info.applicationInfo.enabled || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
+                    || (state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT && !info.enabled))
+                return "锁屏控制组件已停用";
+            return "锁屏控制组件暂时无法连接，请重试";
+        } catch (PackageManager.NameNotFoundException e) {
+            return "未找到锁屏控制组件，请使用项目的设备安装工具补装或更新";
+        } catch (RuntimeException e) {
+            Log.w("IReaderLock", "无法读取控制组件状态", e);
+            return "无法读取锁屏控制组件状态，请重试";
+        }
     }
     private void finishLock(ServiceConnection request, String error) {
         // 忽略超时或页面销毁后到达的旧回调，避免影响下一次点击。
         if (request == null || lockConnection != request) return;
         if (lockTimeout != null) main.removeCallbacks(lockTimeout);
-        if (lockBound) unbindService(request);
+        if (lockBound) {
+            try { unbindService(request); }
+            catch (IllegalArgumentException ignored) { /* 绑定在系统注册前被拒绝时，没有可释放的连接。 */ }
+        }
         lockBound = false; lockConnection = null; lockTimeout = null;
         if (lockButton != null) lockButton.setEnabled(true);
-        if (error != null && !isFinishing() && !isDestroyed()) Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+        if (error == null) return;
+        Log.w("IReaderLock", error);
+        // 迟到的失败不能打断其他页面，也不能在设备已经息屏后弹出授权界面。
+        if (!resumed || isFinishing() || isDestroyed() || !getSystemService(PowerManager.class).isInteractive()) return;
+        new AlertDialog.Builder(this).setTitle("锁屏未完成")
+                .setMessage(error + "。\n\n可以授权系统直接锁屏，之后无需连接控制组件。仅申请锁定屏幕权限，可在桌面设置中取消。")
+                .setPositiveButton("使用系统锁屏", (dialog, which) -> Ui.launch(this, new Intent(this, ScreenLockActivity.class)))
+                .setNegativeButton("取消", null).show();
     }
     private View appIcon(String pkg, String name, Drawable drawable) {
         LinearLayout tile = Ui.column(this); tile.setGravity(Gravity.CENTER);

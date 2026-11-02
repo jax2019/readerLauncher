@@ -25,7 +25,7 @@ public final class SettingsActivity extends Activity {
         entries.add(entry("管理桌面应用", () -> Ui.launch(this, new Intent(this, AppsActivity.class))));
         if (profile.hasPowerAssistant())
             entries.add(entry("省电助手", () -> Ui.launch(this, new Intent(this, PowerActivity.class))));
-        if (profile.nativePowerControls()) entries.add(entry("锁屏授权管理", () -> ScreenLockActivity.manage(this)));
+        if (profile.hasScreenLock()) entries.add(entry("锁屏授权管理", () -> ScreenLockActivity.manage(this)));
         if (profile.settings != null)
             entries.add(entry(AppCatalog.displayName(profile.settings.getPackageName(), "阅读器系统设置"),
                     () -> Ui.launch(this, new Intent().setComponent(profile.settings))));

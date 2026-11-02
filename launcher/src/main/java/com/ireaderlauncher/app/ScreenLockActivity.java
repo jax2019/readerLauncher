@@ -12,7 +12,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.widget.Toast;
 
-/** 多看使用系统仅锁屏授权，不依赖掌阅特权组件，也不常驻后台。 */
+/** 系统仅锁屏授权；多看默认使用，掌阅可作为控制组件不可用时的独立锁屏方式。 */
 public final class ScreenLockActivity extends Activity {
     private static final int AUTHORIZE = 1;
     private static final String AUTHORIZE_ONLY = "authorize_only";
@@ -27,7 +27,7 @@ public final class ScreenLockActivity extends Activity {
             Ui.launch(activity, new Intent(activity, ScreenLockActivity.class).putExtra(AUTHORIZE_ONLY, true)); return;
         }
         new AlertDialog.Builder(activity).setTitle("锁屏授权已开启")
-                .setMessage("阅桌面仅使用立即锁屏权限。取消后，锁屏按钮会重新请求授权；卸载桌面前也可在这里取消。")
+                .setMessage("阅桌面仅使用立即锁屏权限。取消后，多看锁屏需重新授权，掌阅恢复使用控制组件；卸载桌面前也可在这里取消。")
                 .setPositiveButton("保留授权", null)
                 .setNegativeButton("取消锁屏授权", (dialog, which) -> {
                     activity.getSystemService(DevicePolicyManager.class).removeActiveAdmin(admin(activity));
@@ -36,7 +36,7 @@ public final class ScreenLockActivity extends Activity {
     }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        if (!DeviceProfile.current().nativePowerControls()) { finish(); return; }
+        if (!DeviceProfile.current().hasScreenLock()) { finish(); return; }
         awaitingAuthorization = state != null && state.getBoolean("awaiting_authorization");
         if (awaitingAuthorization) return;
         if (authorized(this)) { complete(); return; }

@@ -28,6 +28,7 @@ public final class SmokeInstrumentation extends Instrumentation {
     private boolean bluetoothOnly;
     private boolean nativePowerOnly;
     private boolean nativeLockOnly;
+    private boolean lockFallbackOnly;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         dozeOnly = arguments != null && "doze".equals(arguments.getString("suite"));
@@ -37,7 +38,8 @@ public final class SmokeInstrumentation extends Instrumentation {
         desktopOnly = arguments != null && "desktop".equals(arguments.getString("suite"));
         bluetoothOnly = arguments != null && "bluetooth".equals(arguments.getString("suite"));
         nativePowerOnly = arguments != null && "native_power".equals(arguments.getString("suite"));
-        nativeLockOnly = arguments != null && "native_lock".equals(arguments.getString("suite")); start();
+        nativeLockOnly = arguments != null && "native_lock".equals(arguments.getString("suite"));
+        lockFallbackOnly = arguments != null && "lock_fallback".equals(arguments.getString("suite")); start();
     }
     private void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
     @Override public void onStart() {
@@ -52,6 +54,11 @@ public final class SmokeInstrumentation extends Instrumentation {
         boolean bound = false;
         try {
             checkDesktop(c);
+            if (lockFallbackOnly) {
+                new LockFallbackSmoke(this).run();
+                result.putString("result", "PASS: 组件停用提示、系统授权取消、备用锁屏、重复锁屏及原状态恢复");
+                finish(android.app.Activity.RESULT_OK, result); return;
+            }
             if (nativePowerOnly || nativeLockOnly) {
                 DuokanPowerSmoke nativeTest = new DuokanPowerSmoke(this);
                 if (nativePowerOnly) nativeTest.power(); else nativeTest.lock();
